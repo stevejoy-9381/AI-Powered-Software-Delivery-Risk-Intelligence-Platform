@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Build output
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# ML model artifacts (large files)
+ml-service/app/models/saved/*.joblib
+ml-service/app/models/saved/*.pkl
+ml-service/app/models/saved/*.pt
+
+# Docker volumes
+mongodb_data/
+postgres_data/
