@@ -4,8 +4,53 @@
  */
 import { useState, useEffect, useCallback } from 'react';
 import {
-  BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar
+  BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Treemap
 } from 'recharts';
+
+const CustomizedContent = (props: any) => {
+  const { root, depth, x, y, width, height, index, payload, colors, rank, name, hotspot_score } = props;
+  const score = hotspot_score || 0;
+  const fill = score >= 80 ? 'rgba(239, 68, 68, 0.75)' : score >= 55 ? 'rgba(249, 115, 22, 0.75)' : 'rgba(245, 158, 11, 0.55)';
+  return (
+    <g>
+      <rect
+        x={x}
+        y={y}
+        width={width}
+        height={height}
+        style={{
+          fill,
+          stroke: '#1e293b',
+          strokeWidth: 2,
+          strokeOpacity: 1,
+        }}
+      />
+      {width > 60 && height > 30 && (
+        <text
+          x={x + width / 2}
+          y={y + height / 2 - 2}
+          textAnchor="middle"
+          fill="#fff"
+          fontSize={10}
+          fontWeight="bold"
+        >
+          {name}
+        </text>
+      )}
+      {width > 60 && height > 45 && (
+        <text
+          x={x + width / 2}
+          y={y + height / 2 + 10}
+          textAnchor="middle"
+          fill="#cbd5e1"
+          fontSize={9}
+        >
+          Score: {Math.round(score)}
+        </text>
+      )}
+    </g>
+  );
+};
 import {
   Flame, Award, BarChart3, TrendingUp, Loader2, RefreshCw, CheckCircle, AlertTriangle, AlertCircle
 } from 'lucide-react';
@@ -23,6 +68,16 @@ export default function AnalyticsPage() {
   const [activeTab, setActiveTab] = useState<TabType>('hotspots');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  // Hotspots tab views
+  const [onlyFlagged, setOnlyFlagged] = useState(false);
+  const [viewMode, setViewMode] = useState<'table' | 'treemap'>('table');
+
+  // Benchmarking tab views
+  const [compareTeamId, setCompareTeamId] = useState<string>('');
+  const [compareBenchmark, setCompareBenchmark] = useState<BenchmarkResult | null>(null);
+  const [compareLoading, setCompareLoading] = useState(false);
+  const [maskNames, setMaskNames] = useState(false);
 
   // Dropdown states
   const [projects, setProjects] = useState<Project[]>([]);
@@ -125,6 +180,30 @@ export default function AnalyticsPage() {
     }
   }, []);
 
+  const loadCompareBenchmark = useCallback(async (teamId: string) => {
+    if (!teamId) {
+      setCompareBenchmark(null);
+      return;
+    }
+    setCompareLoading(true);
+    try {
+      const res = await analyticsAPI.getTeamBenchmark(teamId);
+      setCompareBenchmark(res.data.data);
+    } catch {
+      setCompareBenchmark(null);
+    } finally {
+      setCompareLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'benchmarks' && compareTeamId) {
+      loadCompareBenchmark(compareTeamId);
+    } else {
+      setCompareBenchmark(null);
+    }
+  }, [activeTab, compareTeamId, loadCompareBenchmark]);
+
   // Load Skills Heatmap
   const loadSkills = useCallback(async () => {
     const orgId = user?.organizationId;
@@ -210,21 +289,63 @@ export default function AnalyticsPage() {
 
     switch (activeTab) {
       case 'hotspots':
+        const filteredHotspots = hotspots.filter(h => !onlyFlagged || h.is_hotspot || h.flagged);
+        const treemapData = [{
+          name: 'Codebase Hotspots',
+          children: filteredHotspots.map(h => ({
+            name: h.file_path.split('/').pop() || h.file_path,
+            size: Math.max(1, h.churn_count || 1),
+            hotspot_score: h.hotspot_score,
+            file_path: h.file_path,
+          }))
+        }];
+
         return (
-          <div className="space-y-6">
+          <div className="space-y-6 animate-fade-in">
             {/* Project Selector & Actions */}
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-surface-700/50 backdrop-blur-sm border border-white/5 rounded-xl p-4">
-              <div className="flex items-center gap-3 w-full sm:w-auto">
-                <span className="text-xs text-slate-400 font-medium whitespace-nowrap">Project:</span>
-                <select
-                  value={selectedProjectId}
-                  onChange={(e) => setSelectedProjectId(e.target.value)}
-                  className="px-3 py-1.5 bg-surface-800 border border-white/10 rounded-lg text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
-                >
-                  {projects.map((p) => (
-                    <option key={p._id} value={p._id}>{p.name}</option>
-                  ))}
-                </select>
+              <div className="flex flex-wrap items-center gap-4 w-full sm:w-auto">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-400 font-medium whitespace-nowrap">Project:</span>
+                  <select
+                    value={selectedProjectId}
+                    onChange={(e) => setSelectedProjectId(e.target.value)}
+                    className="px-3 py-1.5 bg-surface-800 border border-white/10 rounded-lg text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+                  >
+                    {projects.map((p) => (
+                      <option key={p._id} value={p._id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setViewMode('table')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                      viewMode === 'table' ? 'bg-white/5 border-white/10 text-white' : 'border-transparent text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Table View
+                  </button>
+                  <button
+                    onClick={() => setViewMode('treemap')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                      viewMode === 'treemap' ? 'bg-white/5 border-white/10 text-white' : 'border-transparent text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Treemap View
+                  </button>
+                </div>
+
+                <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={onlyFlagged}
+                    onChange={(e) => setOnlyFlagged(e.target.checked)}
+                    className="rounded border-white/10 bg-surface-800 text-brand-500 focus:ring-brand-500"
+                  />
+                  Only Flagged
+                </label>
               </div>
 
               <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
@@ -263,122 +384,206 @@ export default function AnalyticsPage() {
               </div>
             )}
 
-            {/* Hotspots Table */}
-            <div className="bg-surface-700/50 backdrop-blur-sm border border-white/5 rounded-xl overflow-hidden">
-              <div className="px-6 py-4 border-b border-white/5">
-                <h3 className="text-sm font-semibold text-slate-200">Flagged Churn & Risk Hotspots</h3>
-                <p className="text-xs text-slate-500 mt-0.5">Files with high modification frequency and low test coverage</p>
+            {viewMode === 'treemap' ? (
+              <div className="bg-surface-700/50 backdrop-blur-sm border border-white/5 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-slate-200 mb-1">Visual Risk Matrix</h3>
+                <p className="text-xs text-slate-500 mb-6">Size represents commit churn frequency. Color represents overall hotspot risk score (Red = Critical, Orange = Warning).</p>
+                {filteredHotspots.length === 0 ? (
+                  <div className="py-12 text-center text-sm text-slate-500">No hotspot data available. Check your filters.</div>
+                ) : (
+                  <div className="h-96 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <Treemap
+                        data={treemapData}
+                        dataKey="size"
+                        stroke="#1e293b"
+                        content={<CustomizedContent />}
+                      >
+                        <Tooltip
+                          contentStyle={{ background: '#1e293b', border: '1px solid rgba(255,255,255,0.1)', color: '#fff' }}
+                          formatter={(value, name, props) => {
+                            const payload = props.payload;
+                            return [
+                              `Score: ${Math.round(payload.hotspot_score)}, Churn Count: ${value}`,
+                              payload.file_path || name
+                            ];
+                          }}
+                        />
+                      </Treemap>
+                    </ResponsiveContainer>
+                  </div>
+                )}
               </div>
-              {hotspots.length === 0 ? (
-                <div className="px-6 py-12 text-center text-sm text-slate-500">No hotspots flagged. Try triggering a sync above.</div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-                        <th className="text-left px-6 py-3">File Path</th>
-                        <th className="text-center px-4 py-3">Risk Score</th>
-                        <th className="text-center px-4 py-3">Churn Count</th>
-                        <th className="text-center px-4 py-3">Complexity</th>
-                        <th className="text-center px-4 py-3">Test Coverage</th>
-                        <th className="text-center px-4 py-3">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-white/[.03]">
-                      {hotspots.map((h, i) => (
-                        <tr key={i} className="hover:bg-white/[.01] transition-colors">
-                          <td className="px-6 py-3 font-mono text-xs text-slate-300 max-w-xs sm:max-w-md truncate" title={h.file_path}>
-                            {h.file_path}
-                          </td>
-                          <td className="px-4 py-3 text-center">
-                            <span className={`text-sm font-bold ${
-                              h.hotspot_score >= 80 ? 'text-red-400' :
-                              h.hotspot_score >= 55 ? 'text-orange-400' : 'text-amber-400'
-                            }`}>
-                              {Math.round(h.hotspot_score)}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-center text-xs text-slate-400">{h.churn_count || 0}</td>
-                          <td className="px-4 py-3 text-center text-xs">
-                            {h.complexity_score !== undefined ? (
-                              <span className={h.complexity_score >= 70 ? 'text-red-400' : h.complexity_score >= 45 ? 'text-orange-400' : 'text-slate-400'}>
-                                {Math.round(h.complexity_score)}/100
-                              </span>
-                            ) : (
-                              <span className="text-slate-600">—</span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-center text-xs">
-                            {h.test_coverage_percent !== undefined ? (
-                              <span className={h.test_coverage_percent < 50 ? 'text-red-400' : 'text-slate-400'}>
-                                {h.test_coverage_percent}%
-                              </span>
-                            ) : (
-                              <span className="text-slate-600">N/A</span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-center">
-                            {h.is_hotspot ? (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-red-500/20 text-red-400 border border-red-500/30">
-                                Hotspot
-                              </span>
-                            ) : (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-500/20 text-slate-400">
-                                Monitored
-                              </span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+            ) : (
+              /* Hotspots Table */
+              <div className="bg-surface-700/50 backdrop-blur-sm border border-white/5 rounded-xl overflow-hidden">
+                <div className="px-6 py-4 border-b border-white/5">
+                  <h3 className="text-sm font-semibold text-slate-200">Flagged Churn & Risk Hotspots</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">Files with high modification frequency and low test coverage</p>
                 </div>
-              )}
-            </div>
+                {filteredHotspots.length === 0 ? (
+                  <div className="px-6 py-12 text-center text-sm text-slate-500">No hotspots flagged. Try triggering a sync above.</div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                          <th className="text-left px-6 py-3">File Path</th>
+                          <th className="text-center px-4 py-3">Risk Score</th>
+                          <th className="text-center px-4 py-3">Churn Count</th>
+                          <th className="text-center px-4 py-3">Complexity</th>
+                          <th className="text-center px-4 py-3">Test Coverage</th>
+                          <th className="text-center px-4 py-3">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/[.03]">
+                        {filteredHotspots.map((h, i) => (
+                          <tr key={i} className="hover:bg-white/[.01] transition-colors">
+                            <td className="px-6 py-3 font-mono text-xs text-slate-300 max-w-xs sm:max-w-md truncate" title={h.file_path}>
+                              {h.file_path}
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              <span className={`text-sm font-bold ${
+                                h.hotspot_score >= 80 ? 'text-red-400' :
+                                h.hotspot_score >= 55 ? 'text-orange-400' : 'text-amber-400'
+                              }`}>
+                                {Math.round(h.hotspot_score)}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-center text-xs text-slate-400">{h.churn_count || 0}</td>
+                            <td className="px-4 py-3 text-center text-xs">
+                              {h.complexity_score !== undefined ? (
+                                <span className={h.complexity_score >= 70 ? 'text-red-400' : h.complexity_score >= 45 ? 'text-orange-400' : 'text-slate-400'}>
+                                  {Math.round(h.complexity_score)}/100
+                                </span>
+                              ) : (
+                                <span className="text-slate-600">—</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-center text-xs">
+                              {h.test_coverage_percent !== undefined ? (
+                                <span className={h.test_coverage_percent < 50 ? 'text-red-400' : 'text-slate-400'}>
+                                  {h.test_coverage_percent}%
+                                </span>
+                              ) : (
+                                <span className="text-slate-600">N/A</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              {h.is_hotspot || h.flagged ? (
+                                <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-red-500/20 text-red-400 border border-red-500/30">
+                                  Hotspot
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-500/20 text-slate-400">
+                                  Monitored
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         );
 
       case 'benchmarks':
         if (!benchmark) return null;
-        // Transform breakdown for Radar chart
-        const radarData = benchmark.breakdown.map((b) => ({
-          subject: (b.category || b.metric || '').replace(/_/g, ' ').toUpperCase(),
-          A: b.score,
-          fullMark: 100,
-        }));
+        const teamName = typeof selectedTeamId === 'string' && teams.find(t => t._id === selectedTeamId)?.name || 'Team 1';
+        const compareTeamName = compareTeamId ? (teams.find(t => t._id === compareTeamId)?.name || 'Team 2') : '';
+
+        const radarData = benchmark.breakdown.map((b) => {
+          const cat = b.category || b.metric || '';
+          const compMetric = compareBenchmark?.breakdown.find(cb => (cb.category || cb.metric) === cat);
+          return {
+            subject: cat.replace(/_/g, ' ').toUpperCase(),
+            A: b.score,
+            B: compMetric ? compMetric.score : 0,
+            fullMark: 100,
+          };
+        });
 
         return (
-          <div className="space-y-6">
+          <div className="space-y-6 animate-fade-in">
             {/* Filter Section */}
-            <div className="flex items-center gap-3 bg-surface-700/50 backdrop-blur-sm border border-white/5 rounded-xl p-4">
-              <span className="text-xs text-slate-400 font-medium">Team:</span>
-              <select
-                value={selectedTeamId}
-                onChange={(e) => setSelectedTeamId(e.target.value)}
-                className="px-3 py-1.5 bg-surface-800 border border-white/10 rounded-lg text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
-              >
-                {teams.map((t) => (
-                  <option key={t._id} value={t._id}>{t.name}</option>
-                ))}
-              </select>
+            <div className="flex flex-wrap items-center gap-6 bg-surface-700/50 backdrop-blur-sm border border-white/5 rounded-xl p-4">
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-slate-400 font-medium">Team 1:</span>
+                <select
+                  value={selectedTeamId}
+                  onChange={(e) => setSelectedTeamId(e.target.value)}
+                  className="px-3 py-1.5 bg-surface-800 border border-white/10 rounded-lg text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+                >
+                  {teams.map((t) => (
+                    <option key={t._id} value={t._id}>{t.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-slate-400 font-medium">Compare with (Team 2):</span>
+                <select
+                  value={compareTeamId}
+                  onChange={(e) => setCompareTeamId(e.target.value)}
+                  className="px-3 py-1.5 bg-surface-800 border border-white/10 rounded-lg text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+                >
+                  <option value="">-- No Comparison --</option>
+                  {teams.filter(t => t._id !== selectedTeamId).map((t) => (
+                    <option key={t._id} value={t._id}>{t.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={maskNames}
+                  onChange={(e) => setMaskNames(e.target.checked)}
+                  className="rounded border-white/10 bg-surface-800 text-brand-500 focus:ring-brand-500"
+                />
+                Mask Team Names
+              </label>
             </div>
 
             {/* Benchmark Score Header */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-1 bg-gradient-to-br from-brand-500/10 to-brand-500/5 border border-brand-500/10 rounded-xl p-6 flex flex-col justify-between">
                 <div>
-                  <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Delivery Health Score</h3>
+                  <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                    {maskNames ? "Team 1" : teamName} Health Score
+                  </h3>
                   <div className="flex items-baseline gap-2 mt-4">
                     <span className="text-6xl font-extrabold text-white">{benchmark.healthScore}</span>
                     <span className="text-xl text-slate-500">/100</span>
                   </div>
                   <p className="text-sm text-slate-300 mt-4">
-                    Team is ranked in the <span className="text-brand-400 font-semibold">{benchmark.percentile}%</span> percentile organization-wide.
+                    Ranked in the <span className="text-brand-400 font-semibold">{benchmark.percentile}%</span> percentile.
                   </p>
+
+                  {compareBenchmark && (
+                    <div className="mt-6 border-t border-white/5 pt-4">
+                      <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                        {maskNames ? "Team 2" : compareTeamName} Health Score
+                      </h3>
+                      <div className="flex items-baseline gap-2 mt-2">
+                        <span className="text-4xl font-bold text-slate-300">{compareBenchmark.healthScore}</span>
+                        <span className="text-sm text-slate-500">/100</span>
+                      </div>
+                      <p className="text-xs text-slate-400 mt-1">
+                        Ranked in the <span className="text-rose-400 font-semibold">{compareBenchmark.percentile}%</span> percentile.
+                      </p>
+                    </div>
+                  )}
                 </div>
-                <div className="mt-6 border-t border-white/5 pt-4 flex items-center justify-between">
-                  <span className="text-xs text-slate-500">Health Rating</span>
-                  <span className="text-xl font-bold bg-gradient-to-r from-emerald-400 to-teal-400 bg-clip-text text-transparent">{benchmark.healthGrade}</span>
+                <div className="mt-6 border-t border-white/5 pt-4 flex items-center justify-between text-xs">
+                  <span className="text-slate-500">Health Rating</span>
+                  <span className="font-bold bg-gradient-to-r from-emerald-400 to-teal-400 bg-clip-text text-transparent">
+                    {benchmark.healthGrade} {compareBenchmark ? `vs ${compareBenchmark.healthGrade}` : ''}
+                  </span>
                 </div>
               </div>
 
@@ -391,7 +596,11 @@ export default function AnalyticsPage() {
                       <PolarGrid stroke="rgba(255,255,255,0.05)" />
                       <PolarAngleAxis dataKey="subject" tick={{ fill: '#94a3b8', fontSize: 10 }} />
                       <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fill: '#475569' }} />
-                      <Radar name="Score" dataKey="A" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.2} />
+                      <Radar name={maskNames ? "Team 1" : teamName} dataKey="A" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.15} />
+                      {compareBenchmark && (
+                        <Radar name={maskNames ? "Team 2" : compareTeamName} dataKey="B" stroke="#f43f5e" fill="#f43f5e" fillOpacity={0.15} />
+                      )}
+                      <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid rgba(255,255,255,0.1)' }} />
                     </RadarChart>
                   </ResponsiveContainer>
                 </div>

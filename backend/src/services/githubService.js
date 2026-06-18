@@ -240,6 +240,54 @@ class GitHubService {
       return 0;
     }
   }
+
+  /**
+   * Fetch churn data (file modifications and addition/deletion counts) from GitHub since a specific date.
+   * @param {string} owner - Repo owner
+   * @param {string} repo - Repo name
+   * @param {string} sinceDate - ISO date string
+   * @returns {Object[]} Array of file churn objects
+   */
+  async getChurnData(owner, repo, sinceDate) {
+    await this._checkRateLimit();
+    try {
+      const params = { per_page: 50 };
+      if (sinceDate) params.since = sinceDate;
+
+      const response = await this.client.get(`/repos/${owner}/${repo}/commits`, { params });
+      const commits = response.data;
+
+      const filesMap = {};
+      const commitsToFetch = commits.slice(0, 5); // Fetch top 5 commits to respect rate limit
+
+      for (const commit of commitsToFetch) {
+        try {
+          const detail = await this.client.get(`/repos/${owner}/${repo}/commits/${commit.sha}`);
+          const files = detail.data.files || [];
+          for (const f of files) {
+            if (!filesMap[f.filename]) {
+              filesMap[f.filename] = {
+                filename: f.filename,
+                additions: 0,
+                deletions: 0,
+                commitsCount: 0,
+              };
+            }
+            filesMap[f.filename].additions += f.additions || 0;
+            filesMap[f.filename].deletions += f.deletions || 0;
+            filesMap[f.filename].commitsCount += 1;
+          }
+        } catch (err) {
+          console.warn(`⚠️ Failed to fetch details for commit ${commit.sha}: ${err.message}`);
+        }
+      }
+
+      return Object.values(filesMap);
+    } catch (error) {
+      console.error(`GitHub getChurnData error: ${error.message}`);
+      return [];
+    }
+  }
 }
 
 module.exports = GitHubService;

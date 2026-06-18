@@ -347,4 +347,96 @@ router.post('/:sprintId/batch-pr-analyze', async (req, res, next) => {
   }
 });
 
+// ── POST /api/sprints/:sprintId/analyze-all-prs ────────────
+router.post('/:sprintId/analyze-all-prs', async (req, res, next) => {
+  try {
+    const { sprintId } = req.params;
+    const sprint = await Sprint.findById(sprintId);
+    if (!sprint) {
+      return res.status(404).json({
+        success: false,
+        error: { message: 'Sprint not found.' },
+      });
+    }
+
+    const pullRequests = await PullRequest.find({ sprintId });
+    if (pullRequests.length === 0) {
+      return res.json({
+        success: true,
+        data: {
+          message: 'No pull requests found to analyze.',
+          count: 0,
+          patternsDetected: 'No pull requests found.',
+          riskLevel: 'low',
+        },
+      });
+    }
+
+    // Map PRs for ML service batch endpoint
+    const batchInput = pullRequests.map((pr) => ({
+      title: pr.title,
+      description: pr.description || '',
+      files_changed: (pr.filesChanged || []).map((f) => f.filename),
+      additions: pr.additions || 0,
+      deletions: pr.deletions || 0,
+      has_tests: pr.hasTests || false,
+      githubPrNumber: pr.githubPrNumber,
+    }));
+
+    // Call ML batch endpoint
+    const batchResult = await mlService.analyzePRsBatch(batchInput);
+    
+    const summarizedDetails = [];
+
+    if (batchResult && batchResult.summaries) {
+      for (let i = 0; i < pullRequests.length; i++) {
+        const pr = pullRequests[i];
+        const summary = batchResult.summaries[i];
+        if (summary) {
+          pr.llmSummary = summary.summary || '';
+          pr.riskFlags = summary.risk_flags || [];
+          pr.touchesAuthLogic = summary.touches_auth || false;
+          await pr.save();
+
+          summarizedDetails.push({
+            githubPrNumber: pr.githubPrNumber,
+            title: pr.title,
+            summary: pr.llmSummary,
+            risk_flags: pr.riskFlags,
+            touches_auth: pr.touchesAuthLogic,
+            touches_payments: summary.touches_payments || false,
+            files_changed: (pr.filesChanged || []).map((f) => f.filename),
+          });
+        }
+      }
+    }
+
+    // Call ML pattern detection endpoint
+    let patternResult = null;
+    if (summarizedDetails.length > 0) {
+      patternResult = await mlService.detectRiskPatterns(summarizedDetails, sprint.name);
+      if (patternResult) {
+        sprint.prPatterns = patternResult.patterns_detected || '';
+        if (patternResult.has_critical_patterns) {
+          sprint.riskLevel = 'critical';
+          sprint.riskScore = Math.max(sprint.riskScore || 0, 85);
+        }
+        await sprint.save();
+      }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        message: `Successfully analyzed ${summarizedDetails.length} pull request(s) and ran pattern detection.`,
+        count: summarizedDetails.length,
+        patternsDetected: patternResult?.patterns_detected || 'No significant patterns detected.',
+        riskLevel: patternResult?.risk_level || 'low',
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 module.exports = router;

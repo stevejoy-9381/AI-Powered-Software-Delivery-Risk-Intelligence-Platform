@@ -98,6 +98,34 @@ async function computeBenchmark(teamMetrics) {
 }
 
 /**
+ * Analyze batch of PRs — calls POST /api/pr/summarize-batch
+ * @param {Object[]} pullRequests - List of PR data
+ */
+async function analyzePRsBatch(pullRequests) {
+  return callML('post', '/api/pr/summarize-batch', { pull_requests: pullRequests });
+}
+
+/**
+ * Detect sprint risk patterns — calls POST /api/pr/detect-risk-pattern
+ * @param {Object[]} pullRequests - List of summarized PR data details
+ * @param {string} sprintGoal - Sprint goal/description
+ */
+async function detectRiskPatterns(pullRequests, sprintGoal = '') {
+  return callML('post', '/api/pr/detect-risk-pattern', {
+    pull_requests: pullRequests,
+    sprint_goal: sprintGoal,
+  });
+}
+
+/**
+ * Predict release readiness — calls POST /api/release/predict
+ * @param {Object} releaseData - Release inputs
+ */
+async function predictReleaseReadiness(releaseData) {
+  return callML('post', '/api/release/predict', releaseData);
+}
+
+/**
  * Check ML service health
  */
 async function checkHealth() {
@@ -112,6 +140,9 @@ async function checkHealth() {
 module.exports = {
   analyzeSprintRisk,
   analyzePR,
+  analyzePRsBatch,
+  detectRiskPatterns,
+  predictReleaseReadiness,
   analyzeHotspots,
   analyzeStaffing,
   computeBenchmark,

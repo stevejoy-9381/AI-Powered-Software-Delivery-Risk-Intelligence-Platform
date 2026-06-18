@@ -14,7 +14,7 @@ let pgPool = null;
  * @param {number} retries - Number of connection attempts
  */
 async function connectMongoDB(retries = 5) {
-  const uri = process.env.MONGO_URI || 'mongodb://localhost:27017/delivery_risk_db';
+  const uri = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/delivery_risk_db';
 
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
@@ -45,13 +45,17 @@ async function connectMongoDB(retries = 5) {
 async function connectPostgreSQL(retries = 5) {
   const connectionString =
     process.env.POSTGRES_URI ||
-    'postgresql://drp_user:drp_secret_2024@localhost:5432/ml_feature_store';
+    'postgresql://drp_user:drp_secret_2024@127.0.0.1:5432/ml_feature_store';
 
   pgPool = new Pool({
     connectionString,
     max: 20, // Maximum number of connections in pool
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 5000,
+  });
+
+  pgPool.on('error', (err) => {
+    console.error('Unexpected error on idle PostgreSQL client:', err.message);
   });
 
   for (let attempt = 1; attempt <= retries; attempt++) {

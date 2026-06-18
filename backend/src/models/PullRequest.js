@@ -150,6 +150,9 @@ pullRequestSchema.pre('save', function (next) {
 // ── Indexes ────────────────────────────────────────────────
 pullRequestSchema.index({ sprintId: 1 });
 pullRequestSchema.index({ projectId: 1, status: 1 });
+pullRequestSchema.index({ projectId: 1 });
+pullRequestSchema.index({ status: 1 });
 pullRequestSchema.index({ author: 1 });
+pullRequestSchema.index({ createdAt: -1 });
 
 module.exports = mongoose.model('PullRequest', pullRequestSchema);

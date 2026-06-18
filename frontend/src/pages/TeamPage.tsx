@@ -28,6 +28,7 @@ export default function TeamPage() {
   const [teamSprints, setTeamSprints] = useState<Sprint[]>([]);
   const [benchmark, setBenchmark] = useState<BenchmarkResult | null>(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
+  const [staffingHistory, setStaffingHistory] = useState<any[]>([]);
 
   // Modals & Forms
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -57,15 +58,21 @@ export default function TeamPage() {
     setSelectedTeam(team);
     setDetailsLoading(true);
     try {
-      const [sprintsRes, benchmarkRes] = await Promise.all([
+      const [sprintsRes, benchmarkRes, staffingRes] = await Promise.all([
         sprintAPI.getTeamSprints(team._id, { limit: 15 }),
         analyticsAPI.getTeamBenchmark(team._id).catch(() => null), // fail silently if benchmark is not ready
+        analyticsAPI.getStaffingHistory(team._id).catch(() => null),
       ]);
       setTeamSprints(sprintsRes.data.data?.sprints || []);
       if (benchmarkRes) {
         setBenchmark(benchmarkRes.data.data);
       } else {
         setBenchmark(null);
+      }
+      if (staffingRes) {
+        setStaffingHistory(staffingRes.data.data?.staffingHistory || []);
+      } else {
+        setStaffingHistory([]);
       }
     } catch (err) {
       console.error(err);
@@ -134,7 +141,7 @@ export default function TeamPage() {
         {/* Back Button & Header */}
         <div className="flex items-center gap-4">
           <button
-            onClick={() => { setSelectedTeam(null); setBenchmark(null); setTeamSprints([]); }}
+            onClick={() => { setSelectedTeam(null); setBenchmark(null); setTeamSprints([]); setStaffingHistory([]); }}
             className="p-2 rounded-lg bg-surface-700/50 hover:bg-surface-700 border border-white/5 text-slate-400 hover:text-white transition-all"
           >
             <ArrowLeft className="w-5 h-5" />
@@ -284,84 +291,155 @@ export default function TeamPage() {
           ) : (
             <div className="space-y-6">
               {benchmark ? (
-                <>
-                  {/* Health summary */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div className="bg-surface-700/50 border border-white/5 rounded-xl p-6">
-                      <h4 className="text-xs font-semibold text-slate-400 uppercase">Delivery Health Grade</h4>
-                      <p className="text-5xl font-black bg-gradient-to-r from-emerald-400 to-teal-400 bg-clip-text text-transparent mt-4">
-                        {benchmark.healthGrade}
-                      </p>
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  {/* Left Column - Benchmarks & Recommendations */}
+                  <div className="lg:col-span-2 space-y-6">
+                    {/* Health summary */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                      <div className="bg-surface-700/50 border border-white/5 rounded-xl p-6">
+                        <h4 className="text-xs font-semibold text-slate-400 uppercase">Delivery Health Grade</h4>
+                        <p className="text-5xl font-black bg-gradient-to-r from-emerald-400 to-teal-400 bg-clip-text text-transparent mt-4">
+                          {benchmark.healthGrade}
+                        </p>
+                      </div>
+
+                      <div className="bg-surface-700/50 border border-white/5 rounded-xl p-6">
+                        <h4 className="text-xs font-semibold text-slate-400 uppercase">Health Score</h4>
+                        <p className="text-5xl font-extrabold text-white mt-4">{benchmark.healthScore}</p>
+                      </div>
+
+                      <div className="bg-surface-700/50 border border-white/5 rounded-xl p-6">
+                        <h4 className="text-xs font-semibold text-slate-400 uppercase">Percentile Rank</h4>
+                        <p className="text-5xl font-extrabold text-brand-400 mt-4">{benchmark.percentile}%</p>
+                      </div>
                     </div>
 
+                    {/* Category Breakdown */}
                     <div className="bg-surface-700/50 border border-white/5 rounded-xl p-6">
-                      <h4 className="text-xs font-semibold text-slate-400 uppercase">Health Score</h4>
-                      <p className="text-5xl font-extrabold text-white mt-4">{benchmark.healthScore}</p>
+                      <h3 className="text-sm font-semibold text-slate-200 mb-4">
+                        Health Category Breakdown
+                      </h3>
+                      <div className="space-y-4">
+                        {benchmark.breakdown?.map((cat) => {
+                          const progressColor =
+                            cat.score >= 80 ? 'bg-gradient-to-r from-emerald-500 to-teal-400' :
+                            cat.score >= 60 ? 'bg-gradient-to-r from-amber-500 to-orange-400' :
+                            'bg-gradient-to-r from-red-500 to-rose-400';
+
+                          return (
+                            <div key={cat.category} className="space-y-1.5 p-3 rounded-lg bg-white/[0.02] border border-white/5 hover:border-white/10 transition-all">
+                              <div className="flex justify-between items-center text-xs">
+                                <span className="font-semibold text-slate-300">
+                                  {cat.category} <span className="text-slate-500 font-normal">({(cat.weight * 100).toFixed(0)}% weight)</span>
+                                </span>
+                                <span className="font-mono font-bold text-slate-200">{cat.score.toFixed(1)} / 100</span>
+                              </div>
+                              
+                              <div className="w-full bg-white/5 h-2 rounded-full overflow-hidden">
+                                <div
+                                  className={`h-full rounded-full ${progressColor} transition-all duration-500`}
+                                  style={{ width: `${cat.score}%` }}
+                                />
+                              </div>
+                              
+                              <div className="text-[11px] text-slate-400 flex justify-between">
+                                <span>{cat.details}</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
 
+                    {/* Recommendations */}
                     <div className="bg-surface-700/50 border border-white/5 rounded-xl p-6">
-                      <h4 className="text-xs font-semibold text-slate-400 uppercase">Percentile Rank</h4>
-                      <p className="text-5xl font-extrabold text-brand-400 mt-4">{benchmark.percentile}%</p>
+                      <h3 className="text-sm font-semibold text-slate-200 mb-4 flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-brand-400" />
+                        Team Recommendations
+                      </h3>
+                      {benchmark.recommendations?.length === 0 ? (
+                        <div className="text-xs text-slate-500 italic">No recommendations yet.</div>
+                      ) : (
+                        <div className="space-y-3">
+                          {benchmark.recommendations.map((rec, i) => (
+                            <div key={i} className="flex gap-3 p-3 bg-white/5 border border-white/5 rounded-lg text-xs text-slate-300">
+                              <CheckCircle className="w-4 h-4 text-brand-400 flex-shrink-0" />
+                              <span>{rec}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
 
-                  {/* Category Breakdown */}
-                  <div className="bg-surface-700/50 border border-white/5 rounded-xl p-6">
-                    <h3 className="text-sm font-semibold text-slate-200 mb-4">
-                      Health Category Breakdown
+                  {/* Right Column - Staffing Health sidebar card */}
+                  <div className="bg-surface-700/50 border border-white/5 rounded-xl p-6 h-fit space-y-6">
+                    <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2 border-b border-white/5 pb-3">
+                      <Users className="w-4 h-4 text-brand-400" />
+                      Staffing Health
                     </h3>
-                    <div className="space-y-4">
-                      {benchmark.breakdown?.map((cat) => {
-                        const progressColor =
-                          cat.score >= 80 ? 'bg-gradient-to-r from-emerald-500 to-teal-400' :
-                          cat.score >= 60 ? 'bg-gradient-to-r from-amber-500 to-orange-400' :
-                          'bg-gradient-to-r from-red-500 to-rose-400';
+
+                    {staffingHistory && staffingHistory.length > 0 ? (
+                      (() => {
+                        const latest = staffingHistory[0];
+                        const hasShortage = latest.predicted_shortage > 0;
+                        
+                        // Check recent alerts from sprints and benchmarks
+                        const busFactorSprints = teamSprints.filter(s =>
+                          s.riskFactors?.some(rf => rf.toLowerCase().includes('bus_factor') || rf.toLowerCase().includes('bus factor') || rf.toLowerCase().includes('knowledge is concentrated'))
+                        );
+                        const reviewerOverloadSprints = teamSprints.filter(s =>
+                          s.riskFactors?.some(rf => rf.toLowerCase().includes('reviewer') || rf.toLowerCase().includes('review lag'))
+                        );
+                        const hasBusFactor = busFactorSprints.length > 0 || benchmark.recommendations.some(r => r.toLowerCase().includes('concentrated') || r.toLowerCase().includes('bus factor'));
+                        const hasReviewerOverload = reviewerOverloadSprints.length > 0 || benchmark.recommendations.some(r => r.toLowerCase().includes('review lag') || r.toLowerCase().includes('reviewer'));
 
                         return (
-                          <div key={cat.category} className="space-y-1.5 p-3 rounded-lg bg-white/[0.02] border border-white/5 hover:border-white/10 transition-all">
-                            <div className="flex justify-between items-center text-xs">
-                              <span className="font-semibold text-slate-300">
-                                {cat.category} <span className="text-slate-500 font-normal">({(cat.weight * 100).toFixed(0)}% weight)</span>
-                              </span>
-                              <span className="font-mono font-bold text-slate-200">{cat.score.toFixed(1)} / 100</span>
+                          <div className="space-y-4">
+                            <div className="grid grid-cols-2 gap-3">
+                              <div className="p-3 bg-white/5 border border-white/5 rounded-lg text-center">
+                                <span className="text-[10px] text-slate-500 block">Current Capacity</span>
+                                <span className="text-lg font-bold text-white">{latest.current_capacity} Devs</span>
+                              </div>
+                              <div className="p-3 bg-white/5 border border-white/5 rounded-lg text-center">
+                                <span className="text-[10px] text-slate-500 block">Required Capacity</span>
+                                <span className="text-lg font-bold text-slate-300">{latest.required_capacity} Devs</span>
+                              </div>
                             </div>
-                            
-                            <div className="w-full bg-white/5 h-2 rounded-full overflow-hidden">
-                              <div
-                                className={`h-full rounded-full ${progressColor} transition-all duration-500`}
-                                style={{ width: `${cat.score}%` }}
-                              />
-                            </div>
-                            
-                            <div className="text-[11px] text-slate-400 flex justify-between">
-                              <span>{cat.details}</span>
+
+                            {hasShortage && (
+                              <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-red-400">
+                                <strong className="font-semibold block mb-0.5">Resource Shortage</strong>
+                                Need {latest.predicted_shortage} additional {latest.bottleneck_role || 'developer'} resource(s) for {latest.timeframe || 'upcoming sprints'}.
+                              </div>
+                            )}
+
+                            {hasBusFactor && (
+                              <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-400">
+                                <strong className="font-semibold block mb-0.5">Bus Factor Alert</strong>
+                                High key-person dependency detected. Work is concentrated in a single developer. Pair programming recommended.
+                              </div>
+                            )}
+
+                            {hasReviewerOverload && (
+                              <div className="p-3 rounded-lg bg-orange-500/10 border border-orange-500/20 text-xs text-orange-400">
+                                <strong className="font-semibold block mb-0.5">Reviewer Overload</strong>
+                                PR cycle review lags exceed threshold. Senior developers are bottlenecked on reviews.
+                              </div>
+                            )}
+
+                            <div className="p-3 bg-white/5 border border-white/5 rounded-lg text-xs text-slate-300">
+                              <span className="text-[10px] text-slate-500 block mb-1">AI Staffing Recommendation</span>
+                              {latest.recommendation}
                             </div>
                           </div>
                         );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Recommendations */}
-                  <div className="bg-surface-700/50 border border-white/5 rounded-xl p-6">
-                    <h3 className="text-sm font-semibold text-slate-200 mb-4 flex items-center gap-2">
-                      <Sparkles className="w-4 h-4 text-brand-400" />
-                      Team Recommendations
-                    </h3>
-                    {benchmark.recommendations?.length === 0 ? (
-                      <div className="text-xs text-slate-500 italic">No recommendations yet.</div>
+                      })()
                     ) : (
-                      <div className="space-y-3">
-                        {benchmark.recommendations.map((rec, i) => (
-                          <div key={i} className="flex gap-3 p-3 bg-white/5 border border-white/5 rounded-lg text-xs text-slate-300">
-                            <CheckCircle className="w-4 h-4 text-brand-400 flex-shrink-0" />
-                            <span>{rec}</span>
-                          </div>
-                        ))}
-                      </div>
+                      <div className="text-xs text-slate-500 italic py-4 text-center">No staffing health predictions generated yet.</div>
                     )}
                   </div>
-                </>
+                </div>
               ) : (
                 <div className="bg-surface-700/50 border border-white/5 rounded-xl p-12 text-center text-xs text-slate-500">
                   Benchmark calculations are not yet generated. Complete a few sprints to unlock this tab.

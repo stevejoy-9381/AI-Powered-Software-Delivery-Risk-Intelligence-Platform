@@ -53,3 +53,40 @@ class PRSummaryResponse(BaseModel):
     scope_assessment: str = "on-scope"  # "on-scope", "minor-scope-creep", "major-scope-creep"
     reviewer_note: str = ""
     cached: bool = False
+
+
+# ── Batch and Risk Pattern Models ─────────────────────────
+
+class PRBatchInput(BaseModel):
+    """Input for batch PR summarization."""
+    pull_requests: List[PRDataInput] = Field(..., max_length=100)
+
+
+class PRBatchResponse(BaseModel):
+    """Output for batch PR summarization."""
+    summaries: List[PRSummaryResponse]
+
+
+class PRSummaryDetail(BaseModel):
+    """PR summary metadata for cross-PR analysis."""
+    githubPrNumber: Optional[int] = None
+    title: str
+    summary: str
+    risk_flags: List[str] = Field(default_factory=list)
+    touches_auth: bool = False
+    touches_payments: bool = False
+    files_changed: List[str] = Field(default_factory=list)
+
+
+class PRRiskPatternInput(BaseModel):
+    """Input for sprint-level PR risk pattern detection."""
+    pull_requests: List[PRSummaryDetail]
+    sprint_goal: Optional[str] = ""
+
+
+class PRRiskPatternResponse(BaseModel):
+    """Output for sprint-level PR risk pattern detection."""
+    patterns_detected: str
+    risk_level: str  # "low" | "medium" | "high" | "critical"
+    has_critical_patterns: bool
+

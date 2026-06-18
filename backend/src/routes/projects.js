@@ -18,11 +18,28 @@ router.get('/', async (req, res, next) => {
     if (status) query.status = status;
     if (teamId) query.teamId = teamId;
 
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    let limit = Math.max(1, parseInt(req.query.limit, 10) || 20);
+    if (limit > 100) limit = 100;
+    const skip = (page - 1) * limit;
+
+    const total = await Project.countDocuments(query);
     const projects = await Project.find(query)
       .populate('teamId', 'name')
-      .sort({ updatedAt: -1 });
+      .sort({ updatedAt: -1 })
+      .skip(skip)
+      .limit(limit);
 
-    res.json({ success: true, data: { projects } });
+    res.json({
+      success: true,
+      data: {
+        projects,
+        total,
+        page,
+        limit,
+        pages: Math.ceil(total / limit)
+      }
+    });
   } catch (error) {
     next(error);
   }

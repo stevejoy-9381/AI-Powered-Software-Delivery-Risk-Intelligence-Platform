@@ -12,6 +12,7 @@ import {
   Users, CheckCircle, ShieldAlert,
 } from 'lucide-react';
 import { sprintAPI, githubAPI } from '../utils/api';
+import toast from 'react-hot-toast';
 import type { Sprint, PullRequest, RiskFactor, AnalyzeResult } from '../types';
 import RiskGauge from '../components/shared/RiskGauge';
 import RiskBadge from '../components/shared/RiskBadge';
@@ -33,6 +34,7 @@ export default function SprintDetailPage() {
   const [selectedPR, setSelectedPR] = useState<PullRequest | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [analyzingPR, setAnalyzingPR] = useState<string | null>(null);
+  const [analyzingBatch, setAnalyzingBatch] = useState(false);
 
   const loadData = useCallback(async () => {
     if (!sprintId) return;
@@ -75,6 +77,20 @@ export default function SprintDetailPage() {
       ));
     } catch { /* handled */ }
     setAnalyzingPR(null);
+  };
+
+  const handleBatchAnalyzePRs = async () => {
+    if (!sprintId) return;
+    setAnalyzingBatch(true);
+    try {
+      const res = await sprintAPI.analyzeAllPRs(sprintId);
+      toast.success(res.data.data.message || 'Batch PR analysis and pattern detection completed successfully!');
+      await loadData();
+    } catch {
+      toast.error('Failed to analyze PRs.');
+    } finally {
+      setAnalyzingBatch(false);
+    }
   };
 
   // ── Build commit-per-day data ──────────────────────────────
@@ -157,6 +173,19 @@ export default function SprintDetailPage() {
             </div>
           )}
 
+          {/* ── Detected PR Patterns ─────────────────────── */}
+          {sprint.prPatterns && (
+            <div className="bg-surface-700/50 backdrop-blur-sm border border-white/5 rounded-xl p-6">
+              <h2 className="text-sm font-semibold text-slate-200 mb-3 flex items-center gap-2">
+                <GitPullRequest className="w-4 h-4 text-brand-400" />
+                Detected PR Risk Patterns
+              </h2>
+              <div className="rounded-lg bg-red-500/5 border border-red-500/10 p-4">
+                <p className="text-sm text-slate-300 whitespace-pre-wrap">{sprint.prPatterns}</p>
+              </div>
+            </div>
+          )}
+
           {/* ── PR Table ────────────────────────────────── */}
           <div className="bg-surface-700/50 backdrop-blur-sm border border-white/5 rounded-xl overflow-hidden">
             <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between">
@@ -164,6 +193,16 @@ export default function SprintDetailPage() {
                 <GitPullRequest className="w-4 h-4 text-brand-400" />
                 Pull Requests ({prs.length})
               </h2>
+              {prs.length > 0 && (
+                <AnalyzeButton
+                  onClick={handleBatchAnalyzePRs}
+                  loading={analyzingBatch}
+                  label="Batch Analyze PRs"
+                  loadingLabel="Analyzing all PRs..."
+                  size="sm"
+                  variant="secondary"
+                />
+              )}
             </div>
             {prs.length === 0 ? (
               <div className="px-6 py-12 text-center text-sm text-slate-500">No pull requests in this sprint.</div>

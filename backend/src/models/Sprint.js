@@ -122,6 +122,10 @@ const sprintSchema = new mongoose.Schema(
         trim: true,
       },
     ],
+    prPatterns: {
+      type: String,
+      default: null,
+    },
 
     // ── Outcome tracking ─────────────────────────────────
     actualShipDate: {
@@ -153,7 +157,10 @@ const sprintSchema = new mongoose.Schema(
 
 // ── Indexes for common queries ─────────────────────────────
 sprintSchema.index({ teamId: 1, status: 1 });
+sprintSchema.index({ teamId: 1 });
+sprintSchema.index({ status: 1 });
 sprintSchema.index({ projectId: 1, startDate: -1 });
+sprintSchema.index({ createdAt: -1 });
 
 // ── Virtual: completion percentage ─────────────────────────
 sprintSchema.virtual('completionPercentage').get(function () {

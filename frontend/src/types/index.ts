@@ -117,6 +117,7 @@ export interface Sprint {
   riskScore: number | null;
   riskLevel: RiskLevel | null;
   riskFactors: string[];
+  prPatterns?: string;
   wasDelayed: boolean;
   delayDays: number;
   commitFrequency: number;

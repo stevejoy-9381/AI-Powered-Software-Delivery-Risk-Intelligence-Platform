@@ -37,6 +37,41 @@ def _get_sentence_model():
     return _sentence_model
 
 
+_embedding_cache = {}
+
+
+def _get_embeddings(texts: list) -> np.ndarray:
+    """
+    Get embeddings for a list of texts.
+    Uses an in-memory cache to avoid recomputing embeddings for the same text.
+    """
+    model = _get_sentence_model()
+    if model is None:
+        raise ValueError("SentenceTransformer model is not available")
+
+    embeddings = []
+    texts_to_encode = []
+    to_encode_indices = []
+
+    for idx, text in enumerate(texts):
+        key = text.strip() if text else ""
+        if key in _embedding_cache:
+            embeddings.append((idx, _embedding_cache[key]))
+        else:
+            texts_to_encode.append(text)
+            to_encode_indices.append(idx)
+
+    if texts_to_encode:
+        new_embeddings = model.encode(texts_to_encode)
+        for idx, text, emb in zip(to_encode_indices, texts_to_encode, new_embeddings):
+            key = text.strip() if text else ""
+            _embedding_cache[key] = emb
+            embeddings.append((idx, emb))
+
+    embeddings.sort(key=lambda x: x[0])
+    return np.array([emb for _, emb in embeddings])
+
+
 # ═══════════════════════════════════════════════════════════
 # KEYWORD DICTIONARIES
 # ═══════════════════════════════════════════════════════════
@@ -124,9 +159,9 @@ def compute_sentiment_score(texts: list) -> float:
             negative_ref = "Blocked by critical bug, reverting changes, production incident"
 
             # Get embeddings
-            text_embeddings = model.encode(texts[:50])  # Cap at 50 to limit compute
-            pos_embedding = model.encode([positive_ref])[0]
-            neg_embedding = model.encode([negative_ref])[0]
+            text_embeddings = _get_embeddings(texts[:50])  # Cap at 50 to limit compute
+            pos_embedding = _get_embeddings([positive_ref])[0]
+            neg_embedding = _get_embeddings([negative_ref])[0]
 
             # Compute average cosine similarity to positive vs negative
             avg_embedding = np.mean(text_embeddings, axis=0)
@@ -209,8 +244,8 @@ def detect_scope_creep_from_text(
 
     try:
         # Encode sprint goal and all ticket descriptions
-        goal_embedding = model.encode([sprint_goal])[0]
-        ticket_embeddings = model.encode(ticket_descriptions)
+        goal_embedding = _get_embeddings([sprint_goal])[0]
+        ticket_embeddings = _get_embeddings(ticket_descriptions)
 
         flagged = []
         similarities = []

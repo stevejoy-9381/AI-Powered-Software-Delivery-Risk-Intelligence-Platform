@@ -16,12 +16,29 @@ router.get('/', async (req, res, next) => {
     const query = {};
     if (organizationId) query.organizationId = organizationId;
 
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    let limit = Math.max(1, parseInt(req.query.limit, 10) || 20);
+    if (limit > 100) limit = 100;
+    const skip = (page - 1) * limit;
+
+    const total = await Team.countDocuments(query);
     const teams = await Team.find(query)
       .populate('managerId', 'name email')
       .populate('members.userId', 'name email githubUsername')
-      .sort({ name: 1 });
+      .sort({ name: 1 })
+      .skip(skip)
+      .limit(limit);
 
-    res.json({ success: true, data: { teams } });
+    res.json({
+      success: true,
+      data: {
+        teams,
+        total,
+        page,
+        limit,
+        pages: Math.ceil(total / limit)
+      }
+    });
   } catch (error) {
     next(error);
   }

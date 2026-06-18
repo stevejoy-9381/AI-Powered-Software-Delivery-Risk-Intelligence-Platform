@@ -208,6 +208,89 @@ def analyze_staffing_signals(sprint_data: dict, team_history: list = None) -> di
                     f"Knowledge concentrated in {top_author} — pair programming recommended"
                 )
 
+    # ── 5. Knowledge Silo Check ────────────────────────────
+    components = {
+        "auth": ["auth", "login", "password", "token", "permission", "jwt", "session"],
+        "payment": ["payment", "billing", "stripe", "checkout", "invoice"],
+        "database": ["db", "database", "postgres", "mongo", "migration", "sql", "schema"],
+        "ci_cd": ["ci", "cd", "docker", "compose", "pipeline", "workflow", "actions", "deploy"],
+    }
+    
+    component_authors = {comp: {} for comp in components}
+    for commit in all_commits:
+        msg = commit.get("message", "").lower() if commit.get("message") else ""
+        author = commit.get("author", "unknown")
+        for comp, keywords in components.items():
+            if any(kw in msg for kw in keywords):
+                component_authors[comp][author] = component_authors[comp].get(author, 0) + 1
+
+    for comp, authors in component_authors.items():
+        total_comp_commits = sum(authors.values())
+        if total_comp_commits >= 3:
+            if len(authors) == 1:
+                sole_author = list(authors.keys())[0]
+                bottlenecks.append({
+                    "type": "knowledge_silo",
+                    "severity": "medium",
+                    "metric": f"Single owner for {comp} component",
+                    "description": (
+                        f"Only {sole_author} has committed to the '{comp}' component "
+                        f"({total_comp_commits} commits) in recent sprints. "
+                        f"This creates a knowledge silo."
+                    ),
+                })
+                recommendations.append(
+                    f"Cross-train other developers on the '{comp}' component currently owned solely by {sole_author}"
+                )
+
+    # ── 6. Availability Risk / Recent Drop-off Check ────────
+    author_sprint_counts = {}
+    for idx, past_sprint in enumerate(team_history):
+        sprint_commits = past_sprint.get("commits", [])
+        counts_this_sprint = {}
+        for c in sprint_commits:
+            author = c.get("author", "unknown")
+            counts_this_sprint[author] = counts_this_sprint.get(author, 0) + 1
+        
+        for author, count in counts_this_sprint.items():
+            if author not in author_sprint_counts:
+                author_sprint_counts[author] = [0] * len(team_history)
+            author_sprint_counts[author][idx] = count
+            
+    current_counts = {}
+    for c in commits:
+        author = c.get("author", "unknown")
+        current_counts[author] = current_counts.get(author, 0) + 1
+        
+    for author, counts in author_sprint_counts.items():
+        current_count = current_counts.get(author, 0)
+        if len(counts) >= 1:
+            historical_mean = sum(counts) / len(counts)
+            if historical_mean >= 3:
+                import math
+                variance = sum((x - historical_mean) ** 2 for x in counts) / len(counts)
+                std_dev = math.sqrt(variance)
+                
+                if std_dev > 0:
+                    z_score = (current_count - historical_mean) / std_dev
+                else:
+                    z_score = (current_count - historical_mean) / 1.0
+                
+                if z_score < -1.5 or (current_count <= 1 and historical_mean >= 5):
+                    bottlenecks.append({
+                        "type": "availability_risk",
+                        "severity": "high" if current_count == 0 else "medium",
+                        "metric": f"{author} commit drop-off (curr: {current_count}, avg: {historical_mean:.1f})",
+                        "description": (
+                            f"Commit activity for {author} dropped significantly this sprint "
+                            f"(current: {current_count} commits vs historical average of {historical_mean:.1f}). "
+                            f"This indicates potential unavailability."
+                        ),
+                    })
+                    recommendations.append(
+                        f"Check availability of {author} and reallocate critical tasks if necessary"
+                    )
+
     # ── Build final recommendation ─────────────────────────
     if not recommendations:
         staffing_recommendation = "Team staffing appears balanced — no immediate action needed"
@@ -251,5 +334,9 @@ def _estimate_impact(bottlenecks: list) -> str:
             impacts.append("Reducing WIP could improve throughput by 20-30%")
         elif bn_type in ("backend_bottleneck", "frontend_bottleneck"):
             impacts.append("Rebalancing team could improve velocity by 15-25%")
+        elif bn_type == "knowledge_silo":
+            impacts.append("Cross-training could mitigate single-point-of-failure risk")
+        elif bn_type == "availability_risk":
+            impacts.append("Reallocating tasks could prevent sprint delays from contributor absence")
 
     return "; ".join(impacts) if impacts else "Addressing bottlenecks could improve delivery predictability"

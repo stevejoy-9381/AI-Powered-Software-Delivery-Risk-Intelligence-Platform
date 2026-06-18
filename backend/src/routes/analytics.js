@@ -439,36 +439,58 @@ router.get('/release-readiness/:projectId', async (req, res, next) => {
       ],
     });
 
-    // Compute readiness score (inverse of risk signals)
-    const blockers = [];
-    let riskPoints = 0;
+    // Compute readiness score (ML hybrid model with fallback to rule-based)
+    const inputData = {
+      sprint_risk_score: sprintRisk,
+      hotspot_count: hotspotCount,
+      critical_pr_count: criticalPRs.length,
+      days_remaining: activeSprint ? (activeSprint.daysRemaining || 7) : 7,
+    };
 
-    if (sprintRisk > 50) {
-      riskPoints += 30;
-      blockers.push(`Active sprint at ${activeSprint?.riskLevel || 'high'} risk (score: ${sprintRisk})`);
-    }
-    if (hotspotCount > 5) {
-      riskPoints += 20;
-      blockers.push(`${hotspotCount} codebase hotspots flagged`);
-    }
-    if (criticalPRs.length > 0) {
-      riskPoints += 15 * Math.min(criticalPRs.length, 3);
-      blockers.push(`${criticalPRs.length} open critical PR(s) need review`);
-    }
-    if (activeSprint && activeSprint.daysRemaining <= 2) {
-      riskPoints += 15;
-      blockers.push(`Only ${activeSprint.daysRemaining} day(s) remaining in sprint`);
-    }
+    let readinessScore = 100;
+    let blockers = [];
+    let recommendation = '';
+    let predictedDelayProbability = 0;
+    let modelUsed = false;
 
-    const readinessScore = Math.max(0, 100 - riskPoints);
-
-    let recommendation;
-    if (readinessScore >= 80) {
-      recommendation = 'Release looks good — no major blockers detected.';
-    } else if (readinessScore >= 50) {
-      recommendation = 'Some risks identified — review blockers before releasing.';
+    const mlResult = await mlService.predictReleaseReadiness(inputData);
+    if (mlResult) {
+      readinessScore = mlResult.readiness_score;
+      blockers = mlResult.blockers || [];
+      recommendation = mlResult.recommendation || '';
+      predictedDelayProbability = mlResult.predicted_delay_probability || 0;
+      modelUsed = mlResult.model_used || false;
     } else {
-      recommendation = 'High risk — address critical blockers before considering release.';
+      // Fallback: rule-based deductions (4 specific deductions)
+      let riskPoints = 0;
+
+      if (sprintRisk > 50) {
+        riskPoints += 30;
+        blockers.push(`Active sprint at ${activeSprint?.riskLevel || 'high'} risk (score: ${sprintRisk})`);
+      }
+      if (hotspotCount > 5) {
+        riskPoints += 20;
+        blockers.push(`${hotspotCount} codebase hotspots flagged`);
+      }
+      if (criticalPRs.length > 0) {
+        riskPoints += 15 * Math.min(criticalPRs.length, 3);
+        blockers.push(`${criticalPRs.length} open critical PR(s) need review`);
+      }
+      if (activeSprint && activeSprint.daysRemaining <= 2) {
+        riskPoints += 15;
+        blockers.push(`Only ${activeSprint.daysRemaining} day(s) remaining in sprint`);
+      }
+
+      readinessScore = Math.max(0, 100 - riskPoints);
+
+      if (readinessScore >= 80) {
+        recommendation = 'Release looks good — no major blockers detected.';
+      } else if (readinessScore >= 50) {
+        recommendation = 'Some risks identified — review blockers before releasing.';
+      } else {
+        recommendation = 'High risk — address critical blockers before considering release.';
+      }
+      predictedDelayProbability = 1.0 - (readinessScore / 100.0);
     }
 
     res.json({
@@ -477,6 +499,8 @@ router.get('/release-readiness/:projectId', async (req, res, next) => {
         readinessScore,
         blockers,
         recommendation,
+        predictedDelayProbability,
+        modelUsed,
         sprintRiskScore: sprintRisk,
         hotspotCount,
         openCriticalPRs: criticalPRs.length,

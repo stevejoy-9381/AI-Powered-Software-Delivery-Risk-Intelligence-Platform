@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 MODEL_DIR = Path(__file__).resolve().parent.parent / "models" / "saved"
 XGBOOST_MODEL_PATH = MODEL_DIR / "risk_model.pkl"
 LGBM_MODEL_PATH = MODEL_DIR / "lgbm_risk_model.pkl"
+LGBM_RELEASE_MODEL_PATH = MODEL_DIR / "lgbm_release_model.pkl"
 
 # Feature columns used by the model — MUST match feature_engineering.py FEATURE_COLUMNS
 from app.utils.feature_engineering import FEATURE_COLUMNS
@@ -78,6 +79,41 @@ def load_training_data(postgres_uri: str = None) -> pd.DataFrame:
 
     # Handle missing values
     df = df.fillna(0)
+
+    # Map PostgreSQL columns to FEATURE_COLUMNS
+    if not df.empty:
+        if 'commit_frequency' in df.columns:
+            mean_commit = df['commit_frequency'].mean()
+            std_commit = df['commit_frequency'].std()
+            df['commit_frequency_zscore'] = (df['commit_frequency'] - mean_commit) / (std_commit if std_commit > 0 else 1.0)
+        
+        if 'pr_review_lag_change' in df.columns:
+            df['pr_review_lag_ratio'] = 1.0 + df['pr_review_lag_change'] / 100.0
+        elif 'pr_review_lag_avg_hours' in df.columns:
+            mean_lag = df['pr_review_lag_avg_hours'].mean()
+            df['pr_review_lag_ratio'] = df['pr_review_lag_avg_hours'] / (mean_lag if mean_lag > 0 else 1.0)
+
+        if 'code_churn_rate' in df.columns:
+            df['churn_rate'] = df['code_churn_rate']
+
+        if 'tickets_added_mid_sprint' in df.columns:
+            df['scope_creep_score'] = df['tickets_added_mid_sprint'].astype(float) / 10.0
+
+        if 'tickets_reopened_count' in df.columns:
+            df['reopen_rate'] = df['tickets_reopened_count'].astype(float) / 10.0
+
+        if 'blocked_tickets_count' in df.columns:
+            df['blocked_ratio'] = df['blocked_tickets_count'].astype(float) / 10.0
+
+        if 'days_remaining' in df.columns:
+            df['days_pressure'] = df['days_remaining'].astype(float) / 14.0
+
+        if 'planned_points' in df.columns and 'team_size' in df.columns:
+            df['team_utilization'] = df['planned_points'].astype(float) / df['team_size'].clip(lower=1)
+            df['team_utilization'] = df['team_utilization'].clip(0, 10)
+
+        if 'was_delayed' in df.columns:
+            df['was_delayed'] = df['was_delayed'].astype(int)
 
     return df
 
@@ -370,6 +406,113 @@ def predict_risk(features: dict, model=None) -> dict:
         return {"delay_probability": 0.5, "confidence": 0.0}
 
 
+_loaded_release_model = None
+
+
+def load_release_model(model_path: str = None):
+    """
+    Load the trained release readiness prediction model from disk.
+    """
+    global _loaded_release_model
+
+    if _loaded_release_model is not None:
+        return _loaded_release_model
+
+    release_path = Path(model_path) if model_path else LGBM_RELEASE_MODEL_PATH
+    if release_path.exists():
+        try:
+            _loaded_release_model = joblib.load(release_path)
+            logger.info(f"✅ Loaded LightGBM release model from {release_path}")
+            return _loaded_release_model
+        except Exception as e:
+            logger.warning(f"Failed to load LightGBM release model: {e}")
+
+    logger.warning("⚠️ No trained release model found — release readiness will use rule-based scoring only")
+    return None
+
+
+def generate_synthetic_release_data(n_samples: int = 500) -> pd.DataFrame:
+    """
+    Generate synthetic release training data.
+    Features: sprint_risk_score, hotspot_count, critical_pr_count, days_remaining
+    """
+    logger.info(f"Generating {n_samples} synthetic release training samples...")
+    np.random.seed(42)
+    data = []
+
+    for i in range(n_samples):
+        sprint_risk_score = np.random.uniform(0.0, 100.0)
+        hotspot_count = np.random.poisson(lam=2)
+        critical_pr_count = np.random.poisson(lam=0.5)
+        days_remaining = np.random.randint(0, 15)
+
+        base_prob = 0.1
+        base_prob += (sprint_risk_score / 100.0) * 0.4
+        base_prob += min(hotspot_count / 10.0, 1.0) * 0.2
+        base_prob += min(critical_pr_count / 3.0, 1.0) * 0.2
+        base_prob += max((14 - days_remaining) / 14.0, 0) * 0.1
+        base_prob = min(max(base_prob, 0.0), 0.95)
+
+        is_delayed = np.random.random() < base_prob
+
+        data.append({
+            "sprint_risk_score": sprint_risk_score,
+            "hotspot_count": hotspot_count,
+            "critical_pr_count": critical_pr_count,
+            "days_remaining": days_remaining,
+            "was_delayed": int(is_delayed)
+        })
+
+    return pd.DataFrame(data)
+
+
+def train_release_model(df: pd.DataFrame) -> dict:
+    """
+    Train LightGBM release readiness model.
+    """
+    from lightgbm import LGBMClassifier
+    from sklearn.model_selection import train_test_split
+    from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
+
+    logger.info("=" * 50)
+    logger.info("TRAINING RELEASE DELAY PREDICTION MODEL (LIGHTGBM)")
+    logger.info("=" * 50)
+
+    features = ["sprint_risk_score", "hotspot_count", "critical_pr_count", "days_remaining"]
+    X = df[features].values
+    y = df["was_delayed"].values
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, stratify=y, random_state=42
+    )
+
+    lgbm_model = LGBMClassifier(
+        n_estimators=100,
+        max_depth=4,
+        learning_rate=0.05,
+        random_state=42,
+        verbose=-1,
+    )
+    lgbm_model.fit(X_train, y_train)
+
+    y_pred = lgbm_model.predict(X_test)
+    y_proba = lgbm_model.predict_proba(X_test)[:, 1]
+
+    metrics = {
+        "accuracy": round(accuracy_score(y_test, y_pred), 4),
+        "f1": round(f1_score(y_test, y_pred, zero_division=0), 4),
+        "roc_auc": round(roc_auc_score(y_test, y_proba), 4),
+    }
+
+    logger.info(f"Release Model Results: {metrics}")
+
+    MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    joblib.dump(lgbm_model, LGBM_RELEASE_MODEL_PATH)
+    logger.info(f"✅ Release model saved to {LGBM_RELEASE_MODEL_PATH}")
+
+    return {"model": lgbm_model, "metrics": metrics}
+
+
 # ═══════════════════════════════════════════════════════════
 # STANDALONE TRAINING SCRIPT
 # ═══════════════════════════════════════════════════════════
@@ -386,6 +529,11 @@ if __name__ == "__main__":
 
     results = train_models(df)
 
+    # Train and save the release model
+    logger.info("Starting release readiness model training pipeline...")
+    df_release = generate_synthetic_release_data(500)
+    release_results = train_release_model(df_release)
+
     logger.info("\n" + "=" * 50)
     logger.info("TRAINING COMPLETE")
     logger.info("=" * 50)
@@ -393,3 +541,7 @@ if __name__ == "__main__":
         logger.info(f"\n{name.upper()} Metrics:")
         for metric, value in result["metrics"].items():
             logger.info(f"  {metric}: {value}")
+
+    logger.info(f"\nRELEASE MODEL Metrics:")
+    for metric, value in release_results["metrics"].items():
+        logger.info(f"  {metric}: {value}")

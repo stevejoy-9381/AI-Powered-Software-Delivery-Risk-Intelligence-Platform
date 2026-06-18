@@ -101,6 +101,9 @@ export const sprintAPI = {
 
   batchPRAnalyze: (sprintId: string) =>
     api.post<ApiResponse<{ message: string; count: number }>>(`/api/sprints/${sprintId}/batch-pr-analyze`),
+
+  analyzeAllPRs: (sprintId: string) =>
+    api.post<ApiResponse<{ message: string; count: number; patternsDetected: string; riskLevel: string }>>(`/api/sprints/${sprintId}/analyze-all-prs`),
 };
 
 // ── Project API ────────────────────────────────────────────

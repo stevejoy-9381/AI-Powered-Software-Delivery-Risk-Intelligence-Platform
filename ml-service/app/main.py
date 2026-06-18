@@ -7,6 +7,7 @@ FastAPI application for all ML/NLP operations:
 - PR summarization
 - Team benchmarking
 - Staffing prediction
+- Release readiness prediction
 """
 
 import os
@@ -30,21 +31,30 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 Starting ML Service...")
     logger.info("📦 Loading ML models...")
 
-    # ── Load ML model at startup ───────────────────────────
+    # ── Load ML models at startup ───────────────────────────
     try:
-        from app.utils.model_trainer import load_model
+        from app.utils.model_trainer import load_model, load_release_model
         model = load_model()
         app.state.ml_model = model
         app.state.model_loaded = model is not None
 
         if model is not None:
-            logger.info("✅ ML model loaded successfully")
+            logger.info("✅ ML risk model loaded successfully")
         else:
-            logger.warning("⚠️ No trained model found — using rule-based scoring only")
+            logger.warning("⚠️ No trained risk model found — using rule-based scoring only")
+
+        # Load release readiness model
+        release_model = load_release_model()
+        app.state.release_model = release_model
+        if release_model is not None:
+            logger.info("✅ ML release model loaded successfully")
+        else:
+            logger.warning("⚠️ No trained release model found — using rule-based release scoring only")
     except Exception as e:
-        logger.error(f"❌ Failed to load ML model: {e}")
+        logger.error(f"❌ Failed to load ML models: {e}")
         app.state.ml_model = None
         app.state.model_loaded = False
+        app.state.release_model = None
 
     logger.info("✅ ML Service ready")
 
@@ -53,6 +63,7 @@ async def lifespan(app: FastAPI):
     # Shutdown: cleanup resources
     logger.info("🔌 Shutting down ML Service...")
     app.state.ml_model = None
+    app.state.release_model = None
 
 
 # ── Initialize FastAPI App ──────────────────────────────────
@@ -105,6 +116,7 @@ async def health_check():
         "service": "delivery-risk-ml-service",
         "version": "1.0.0",
         "model_loaded": getattr(app.state, "model_loaded", False),
+        "release_model_loaded": getattr(app.state, "release_model", None) is not None,
     }
 
 
@@ -118,6 +130,7 @@ async def root():
         "health": "/health",
         "endpoints": {
             "risk_score": "/api/risk/score",
+            "release_readiness": "/api/release/predict",
             "hotspot_analysis": "/api/hotspots/analyze",
             "pr_summarization": "/api/pr/summarize",
             "staffing_analysis": "/api/staffing/analyze",
@@ -132,12 +145,14 @@ from app.routers.hotspot_router import router as hotspot_router
 from app.routers.pr_router import router as pr_router
 from app.routers.staffing_router import router as staffing_router
 from app.routers.benchmark_router import router as benchmark_router
+from app.routers.release_router import router as release_router
 
 app.include_router(risk_router)
 app.include_router(hotspot_router)
 app.include_router(pr_router)
 app.include_router(staffing_router)
 app.include_router(benchmark_router)
+app.include_router(release_router)
 
 
 # ── Run with uvicorn ────────────────────────────────────────
@@ -145,7 +160,7 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(
-        "main:app",
+        "app.main:app",
         host=os.getenv("HOST", "0.0.0.0"),
         port=int(os.getenv("PORT", 8000)),
         reload=os.getenv("DEBUG", "true").lower() == "true",

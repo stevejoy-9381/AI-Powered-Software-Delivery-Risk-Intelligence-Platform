@@ -24,6 +24,7 @@ export default function ProjectPage() {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [readiness, setReadiness] = useState<ReleaseReadiness | null>(null);
   const [readinessLoading, setReadinessLoading] = useState(false);
+  const [completedItems, setCompletedItems] = useState<Record<string, boolean>>({});
 
   // Modal / Creation state
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -206,6 +207,40 @@ export default function ProjectPage() {
                 <div className="flex items-center gap-3 p-4 bg-emerald-500/5 border border-emerald-500/10 rounded-lg">
                   <CheckCircle className="w-5 h-5 text-emerald-400" />
                   <p className="text-xs text-emerald-400">All release gates looking good. No blockers detected!</p>
+                </div>
+              )}
+
+              {/* What Needs to Improve Checklist */}
+              {!readinessLoading && readiness?.blockers && readiness.blockers.length > 0 && (
+                <div className="mt-6 border-t border-white/5 pt-4">
+                  <h3 className="text-xs font-semibold text-slate-400 mb-3 uppercase tracking-wider">What Needs to Improve</h3>
+                  <div className="space-y-2">
+                    {readiness.blockers.map((b, i) => {
+                      const itemKey = `${selectedProject._id}-${i}`;
+                      const isDone = completedItems[itemKey] || false;
+                      return (
+                        <label
+                          key={i}
+                          className="flex items-center gap-3 p-3 rounded-lg bg-white/5 hover:bg-white/[0.08] cursor-pointer transition-colors border border-white/5"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isDone}
+                            onChange={() => setCompletedItems(prev => ({ ...prev, [itemKey]: !isDone }))}
+                            className="rounded border-white/10 bg-surface-800 text-brand-500 focus:ring-brand-500 focus:ring-offset-surface-800"
+                          />
+                          <span className={`text-xs text-slate-300 transition-all ${isDone ? 'line-through text-slate-500' : ''}`}>
+                            {b.includes('sprint at high risk') ? 'Reduce active sprint risk factors' :
+                             b.includes('hotspots flagged') ? 'Resolve codebase hotspots' :
+                             b.includes('open critical PR(s)') ? 'Review and merge open critical PRs' :
+                             b.includes('remaining in sprint') ? 'Adjust release scope or timeline' :
+                             b
+                            }
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </div>

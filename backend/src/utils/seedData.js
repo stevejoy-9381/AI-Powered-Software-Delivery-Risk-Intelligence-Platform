@@ -679,6 +679,20 @@ async function seed() {
     );
     console.log(`\n👥 Created ${users.length} users for ${org.name}`);
 
+    // Create default demo admin user for local development login
+    if (org.name === 'TechCorp') {
+      await User.create({
+        name: 'Demo Admin',
+        email: 'admin@demo.com',
+        password: 'Demo@123',
+        role: 'admin',
+        githubUsername: 'admin-demo',
+        avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=DemoAdmin',
+        organizationId: org._id,
+      });
+      console.log('🔑 Created default demo admin user: admin@demo.com / Demo@123');
+    }
+
     const userNames = users.map((u) => u.githubUsername || u.name);
 
     // ── Create Teams ─────────────────────────────────────

@@ -435,6 +435,56 @@ router.get('/analyze-hotspots/:projectId', async (req, res, next) => {
         }
       }
     }
+
+    // Call real GitHub API if available
+    const parsed = parseRepo(project.githubRepo);
+    let githubToken = req.headers['x-github-token'] || req.user?.githubAccessToken;
+    if (!githubToken && process.env.NODE_ENV === 'development') {
+      githubToken = 'dummy-token';
+    }
+
+    if (parsed && githubToken && githubToken !== 'dummy-token') {
+      try {
+        const github = new GitHubService(githubToken);
+        const { owner, repo } = parsed;
+        const churnData = await github.getChurnData(owner, repo, new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
+        for (const file of churnData) {
+          const path = file.filename;
+          if (!fileMap[path]) {
+            fileMap[path] = {
+              file_path: path,
+              churn_count: file.commitsCount,
+              has_tests: false,
+              test_coverage_percent: null,
+              authors_count: 1,
+              is_critical_path: false,
+              last_modified_days_ago: 5,
+              _authors: new Set(['developer']),
+              _additions: file.additions,
+              _deletions: file.deletions,
+            };
+          } else {
+            fileMap[path].churn_count = Math.max(fileMap[path].churn_count, file.commitsCount);
+            fileMap[path]._additions += file.additions;
+            fileMap[path]._deletions += file.deletions;
+          }
+
+          // Detect critical path files
+          const criticalPattern = /auth|payment|billing|security|session|token|core/i;
+          if (criticalPattern.test(path)) {
+            fileMap[path].is_critical_path = true;
+          }
+
+          // Detect test files
+          const testPattern = /\.(test|spec)\.(js|ts|py|jsx|tsx)$|__tests__|test_/i;
+          if (testPattern.test(path)) {
+            fileMap[path].has_tests = true;
+          }
+        }
+      } catch (err) {
+        console.warn('⚠️ Real GitHub churn integration failed:', err.message);
+      }
+    }
  
     // Finalize file data
     const filesData = Object.values(fileMap).map((f) => {
