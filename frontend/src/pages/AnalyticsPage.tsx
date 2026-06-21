@@ -8,7 +8,7 @@ import {
 } from 'recharts';
 
 const CustomizedContent = (props: any) => {
-  const { root, depth, x, y, width, height, index, payload, colors, rank, name, hotspot_score } = props;
+  const { x, y, width, height, name, hotspot_score } = props;
   const score = hotspot_score || 0;
   const fill = score >= 80 ? 'rgba(239, 68, 68, 0.75)' : score >= 55 ? 'rgba(249, 115, 22, 0.75)' : 'rgba(245, 158, 11, 0.55)';
   return (
@@ -76,7 +76,7 @@ export default function AnalyticsPage() {
   // Benchmarking tab views
   const [compareTeamId, setCompareTeamId] = useState<string>('');
   const [compareBenchmark, setCompareBenchmark] = useState<BenchmarkResult | null>(null);
-  const [compareLoading, setCompareLoading] = useState(false);
+  const [, setCompareLoading] = useState(false);
   const [maskNames, setMaskNames] = useState(false);
 
   // Dropdown states
@@ -289,7 +289,7 @@ export default function AnalyticsPage() {
 
     switch (activeTab) {
       case 'hotspots':
-        const filteredHotspots = hotspots.filter(h => !onlyFlagged || h.is_hotspot || h.flagged);
+        const filteredHotspots = hotspots.filter(h => !onlyFlagged || h.is_hotspot);
         const treemapData = [{
           name: 'Codebase Hotspots',
           children: filteredHotspots.map(h => ({
@@ -470,7 +470,7 @@ export default function AnalyticsPage() {
                               )}
                             </td>
                             <td className="px-4 py-3 text-center">
-                              {h.is_hotspot || h.flagged ? (
+                              {h.is_hotspot ?  (
                                 <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-red-500/20 text-red-400 border border-red-500/30">
                                   Hotspot
                                 </span>
@@ -497,8 +497,8 @@ export default function AnalyticsPage() {
         const compareTeamName = compareTeamId ? (teams.find(t => t._id === compareTeamId)?.name || 'Team 2') : '';
 
         const radarData = benchmark.breakdown.map((b) => {
-          const cat = b.category || b.metric || '';
-          const compMetric = compareBenchmark?.breakdown.find(cb => (cb.category || cb.metric) === cat);
+          const cat = b.category || '';
+          const compMetric = compareBenchmark?.breakdown.find(cb => cb.category === cat);
           return {
             subject: cat.replace(/_/g, ' ').toUpperCase(),
             A: b.score,
